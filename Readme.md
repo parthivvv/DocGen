@@ -18,8 +18,6 @@ A backend service that generates PDF and DOCX documents from HTML content.
 - Puppeteer for PDF generation
 - html-to-docx for DOCX generation
 - Joi for input validation
-- Winston for logging
-- Jest for testing
 
 ## Requirements
 
