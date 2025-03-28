@@ -3,84 +3,105 @@ const { JSDOM } = require('jsdom');
 const logger = require('../utils/logger');
 const { CustomError } = require('../utils/errorHandler');
 
-/**
- * Service for generating DOCX documents from HTML content
- */
 class DOCXService {
-    /**
-     * Generate DOCX from HTML content
-     * @param {Object} options - Options for DOCX generation
-     * @param {string} options.contentHtml - Main content HTML
-     * @param {string} options.headerHtml - Header HTML
-     * @param {string} options.footerHtml - Footer HTML
-     * @param {string} options.watermark - Optional watermark HTML
-     * @param {boolean} options.footerOnLastPageOnly - Whether to show footer only on last page
-     * @returns {Promise<Buffer>} - DOCX buffer
-     */
     async generateDOCX({
-                           contentHtml,
-                           headerHtml,
-                           footerHtml,
-                           watermark,
-                           footerOnLastPageOnly = false
-                       }) {
+        contentHtml,
+        headerHtml,
+        footerHtml,
+        watermark,
+        footerOnLastPageOnly = false
+    }) {
         try {
-            // Clean and prepare the HTML content
             const cleanContent = this.cleanHtml(contentHtml);
             const cleanHeader = headerHtml ? this.cleanHtml(headerHtml) : '';
             const cleanFooter = footerHtml ? this.cleanHtml(footerHtml) : '';
 
-            // Prepare watermark if exists
-            let watermarkText = '';
-            if (watermark) {
-                const dom = new JSDOM(watermark);
-                watermarkText = dom.window.document.body.textContent.trim();
-            }
+            const fullHtmlContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <style>
+                        @page {
+                            size: A4;
+                            margin: 1in;
+                            @bottom-center {
+                                content: none;
+                            }
+                        }
+                        body {
+                            margin: 0;
+                            padding: 0;
+                            position: relative;
+                            min-height: 9.25in; /* A4 height - margins */
+                        }
+                        .page {
+                            position: relative;
+                            min-height: 9.25in;
+                            padding: 1in;
+                        }
+                        .header {
+                            position: absolute;
+                            top: 0;
+                            left: 1in;
+                            right: 1in;
+                        }
+                        .content {
+                            min-height: 7.25in; /* Adjusted for header/footer */
+                            position: relative;
+                        }
+                        .footer {
+                            position: absolute;
+                            bottom: 0;
+                            left: 1in;
+                            right: 1in;
+                            text-align: center;
+                            ${footerOnLastPageOnly ? 'display: none;' : ''}
+                        }
+                        .last-page .footer {
+                            display: block;
+                        }
+                        .watermark {
+                            position: fixed;
+                            top: 50%;
+                            left: 50%;
+                            transform: translate(-50%, -50%) rotate(-45deg);
+                            opacity: 0.2;
+                            z-index: -1;
+                            color: gray;
+                            font-size: 48px;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="page ${footerOnLastPageOnly ? 'last-page' : ''}">
+                        ${watermark ? `<div class="watermark">${watermark}</div>` : ''}
+                        ${cleanHeader ? `<div class="header">${cleanHeader}</div>` : ''}
+                        <div class="content">${cleanContent || ''}</div>
+                        ${cleanFooter ? `<div class="footer">${cleanFooter}</div>` : ''}
+                    </div>
+                </body>
+                </html>
+            `;
 
-            // Configure document options
             const options = {
                 title: 'Generated Document',
-                header: cleanHeader ? {
-                    default: cleanHeader
-                } : undefined,
-                footer: cleanFooter ? {
-                    default: footerOnLastPageOnly ? undefined : cleanFooter,
-                    first: undefined,
-                    even: footerOnLastPageOnly ? undefined : cleanFooter,
-                } : undefined,
-                pageNumber: true,
-                watermark: watermarkText || undefined,
-                orientation: 'portrait',
+                pageBreak: true,
                 margins: {
-                    top: 1440, // 1 inch in twips
+                    top: 1440,
                     right: 1440,
                     bottom: 1440,
                     left: 1440
-                }
+                },
+                watermark: watermark ? {
+                    text: this.cleanHtml(watermark),
+                    color: 'gray',
+                    opacity: 0.2,
+                    rotation: -45,
+                    fontSize: 48
+                } : undefined
             };
 
-            // If footer should only be on last page, we need special handling
-            if (footerOnLastPageOnly && cleanFooter) {
-                options.footer = {
-                    default: undefined,
-                    first: undefined,
-                    even: undefined
-                };
-
-                // We need to add a section break before the last paragraph and apply the footer only to that section
-                // This requires manipulating the document.xml after generation
-                // For simplicity, we'll add a placeholder and handle it during document generation
-                cleanContent += `
-          <div style="page-break-before: always;"></div>
-          <div class="last-page" style="display: none;">
-            <!-- Last page marker for footer -->
-          </div>
-          <p>${cleanFooter}</p>
-        `;
-            }
-
-            // Generate the DOCX document
-            const buffer = await htmlToDocx(cleanContent, options);
+            const buffer = await htmlToDocx(fullHtmlContent, options);
             return buffer;
         } catch (error) {
             logger.error('Error generating DOCX:', error);
@@ -88,38 +109,21 @@ class DOCXService {
         }
     }
 
-    /**
-     * Clean HTML content for better DOCX compatibility
-     * @param {string} html - HTML content to clean
-     * @returns {string} - Cleaned HTML
-     */
     cleanHtml(html) {
         if (!html) return '';
-
         try {
             const dom = new JSDOM(html);
             const document = dom.window.document;
-
-            // Fix relative paths in images
-            const images = document.querySelectorAll('img');
-            images.forEach(img => {
+            document.querySelectorAll('img').forEach(img => {
                 if (img.src && !img.src.startsWith('http') && !img.src.startsWith('data:')) {
-                    img.src = ''; // Remove invalid image sources
+                    img.src = '';
                 }
             });
-
-            // Remove script tags as they're not needed in DOCX
-            const scripts = document.querySelectorAll('script');
-            scripts.forEach(script => script.remove());
-
-            // Remove style tags (we'll handle styling differently in DOCX)
-            const styles = document.querySelectorAll('style');
-            styles.forEach(style => style.remove());
-
+            document.querySelectorAll('script').forEach(script => script.remove());
+            document.querySelectorAll('style').forEach(style => style.remove());
             return document.body.innerHTML;
         } catch (error) {
             logger.warn('Error cleaning HTML:', error);
-            // Return the original HTML if cleaning fails
             return html;
         }
     }

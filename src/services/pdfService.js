@@ -2,29 +2,15 @@ const puppeteer = require('puppeteer');
 const logger = require('../utils/logger');
 const { CustomError } = require('../utils/errorHandler');
 
-/**
- * Service for generating PDF documents from HTML content
- */
 class PDFService {
-    /**
-     * Generate PDF from HTML content
-     * @param {Object} options - Options for PDF generation
-     * @param {string} options.contentHtml - Main content HTML
-     * @param {string} options.headerHtml - Header HTML
-     * @param {string} options.footerHtml - Footer HTML
-     * @param {string} options.watermark - Optional watermark HTML
-     * @param {boolean} options.footerOnLastPageOnly - Whether to show footer only on last page
-     * @returns {Promise<Buffer>} - PDF buffer
-     */
     async generatePDF({
-                          contentHtml,
-                          headerHtml,
-                          footerHtml,
-                          watermark,
-                          footerOnLastPageOnly = false
-                      }) {
+        contentHtml,
+        headerHtml,
+        footerHtml,
+        watermark,
+        footerOnLastPageOnly = false
+    }) {
         let browser;
-
         try {
             browser = await puppeteer.launch({
                 headless: 'new',
@@ -32,8 +18,6 @@ class PDFService {
             });
 
             const page = await browser.newPage();
-
-            // Prepare the HTML with styles for header, footer, and watermark
             const htmlContent = this.prepareHTML({
                 contentHtml,
                 headerHtml,
@@ -44,7 +28,6 @@ class PDFService {
 
             await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
 
-            // Generate PDF
             const pdfBuffer = await page.pdf({
                 format: 'A4',
                 printBackground: true,
@@ -54,25 +37,7 @@ class PDFService {
                     left: '50px',
                     right: '50px'
                 },
-                displayHeaderFooter: true,
-                headerTemplate: headerHtml ? `
-          <div style="width: 100%; font-size: 10px; padding: 10px 50px; box-sizing: border-box;">
-            ${headerHtml}
-          </div>
-        ` : '<div></div>',
-                footerTemplate: footerHtml ? `
-          <div style="width: 100%; font-size: 10px; padding: 10px 50px; box-sizing: border-box;">
-            ${footerOnLastPageOnly ? `
-              <span class="pageNumber"></span>
-              <span class="totalPages"></span>
-              <script>
-                if (parseInt(document.querySelector('.pageNumber').innerText) === parseInt(document.querySelector('.totalPages').innerText)) {
-                  document.write('${footerHtml.replace(/'/g, "\\'")}');
-                }
-              </script>
-            ` : footerHtml}
-          </div>
-        ` : '<div></div>',
+                displayHeaderFooter: false
             });
 
             return pdfBuffer;
@@ -80,88 +45,104 @@ class PDFService {
             logger.error('Error generating PDF:', error);
             throw new CustomError(500, `Failed to generate PDF: ${error.message}`);
         } finally {
-            if (browser) {
-                await browser.close();
-            }
+            if (browser) await browser.close();
         }
     }
 
-    /**
-     * Prepare HTML content with styling
-     * @param {Object} options - HTML content options
-     * @returns {string} - Prepared HTML
-     */
-    prepareHTML({ contentHtml, watermark, footerOnLastPageOnly }) {
-        let watermarkStyle = '';
-        let watermarkDiv = '';
-
-        if (watermark) {
-            watermarkStyle = `
-        .watermark {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          z-index: -1000;
-          opacity: 0.2;
-          pointer-events: none;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          overflow: hidden;
-        }
-      `;
-
-            watermarkDiv = `
-        <div class="watermark">
-          ${watermark}
-        </div>
-      `;
-        }
+    prepareHTML({ 
+        contentHtml, 
+        headerHtml, 
+        footerHtml, 
+        watermark, 
+        footerOnLastPageOnly 
+    }) {
+        const watermarkStyle = watermark ? `
+            .watermark {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%) rotate(-45deg);
+                opacity: 0.2;
+                z-index: -1;
+                color: gray;
+                font-size: 48px;
+                pointer-events: none;
+            }
+        ` : '';
 
         return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Generated Document</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            margin: 0;
-            padding: 0;
-          }
-          .content {
-            margin: 0 auto;
-            padding: 20px 0;
-          }
-          ${watermarkStyle}
-          @media print {
-            .page-break {
-              page-break-after: always;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${watermarkDiv}
-        <div class="content">
-          ${contentHtml}
-        </div>
-        <script>
-          // Script for handling footer on last page only if needed
-          ${footerOnLastPageOnly ? `
-            document.addEventListener('DOMContentLoaded', function() {
-              // Add custom logic if needed for client-side rendering
-            });
-          ` : ''}
-        </script>
-      </body>
-      </html>
-    `;
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Generated Document</title>
+                <style>
+                    @page {
+                        size: A4;
+                        margin: 0;
+                    }
+                    body {
+                        margin: 0;
+                        padding: 0;
+                    }
+                    .page {
+                        position: relative;
+                        min-height: 1056px; /* A4 height at 96dpi - margins */
+                        padding: 100px 50px;
+                        box-sizing: border-box;
+                    }
+                    .header {
+                        position: absolute;
+                        top: 0;
+                        left: 50px;
+                        right: 50px;
+                        padding-top: 50px;
+                    }
+                    .content {
+                        min-height: 756px; /* Adjusted for header/footer space */
+                        position: relative;
+                    }
+                    .footer {
+                        position: absolute;
+                        bottom: 0;
+                        left: 50px;
+                        right: 50px;
+                        padding-bottom: 50px;
+                        ${footerOnLastPageOnly ? 'display: none;' : ''}
+                    }
+                    .last-page .footer {
+                        display: block;
+                    }
+                    ${watermarkStyle}
+                </style>
+            </head>
+            <body>
+                ${watermark ? `<div class="watermark">${watermark}</div>` : ''}
+                <div class="page ${footerOnLastPageOnly ? 'last-page' : ''}">
+                    ${headerHtml ? `<div class="header">${headerHtml}</div>` : ''}
+                    <div class="content">${contentHtml || ''}</div>
+                    ${footerHtml ? `<div class="footer">${footerHtml}</div>` : ''}
+                </div>
+                <script>
+                    // For multi-page documents
+                    if (${footerOnLastPageOnly} && document.body.scrollHeight > 1056) {
+                        document.querySelector('.page').classList.remove('last-page');
+                        const pages = Math.ceil(document.body.scrollHeight / 1056);
+                        for (let i = 1; i < pages; i++) {
+                            const clone = document.querySelector('.page').cloneNode(true);
+                            clone.classList.remove('last-page');
+                            document.body.appendChild(clone);
+                        }
+                        const lastPage = document.createElement('div');
+                        lastPage.classList.add('page', 'last-page');
+                        lastPage.innerHTML = document.querySelector('.content').innerHTML + 
+                            '${footerHtml ? `<div class="footer">${footerHtml}</div>` : ''}';
+                        document.body.appendChild(lastPage);
+                    }
+                </script>
+            </body>
+            </html>
+        `;
     }
 }
 
