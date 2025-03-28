@@ -100,7 +100,7 @@ curl -X POST http://localhost:3000/api/generate \
 - ✅ File download as attachment
 
 ### Bonus Tasks:
-- ✅ Watermark support for both PDF
+- ✅ Watermark support for PDF
 - ✅ Conditional footer rendering (only on the last page)
 
 ### Additional Features:
